@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Valentine Quest: Carmen</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --brick-red: #e3000b;
+            --brick-blue: #0055bf;
+            --brick-yellow: #ffcf00;
+            --brick-green: #00852b;
+            --brick-white: #ffffff;
+            --brick-black: #111111;
+            --stud-shadow: rgba(0, 0, 0, 0.15);
+            --pixel-size: 8px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><rect width="20" height="20" fill="none"/><path d="M2,2 L2,18 L6,18 L6,14 L8,14 L8,12 L10,12 L10,10 L12,10 L12,8 L14,8 L14,6 L18,6 L18,2 Z" fill="white" stroke="black" stroke-width="2"/></svg>'), auto;
+        }
+
+        body {
+            background-color: #222;
+            background-image: 
+                radial-gradient(var(--stud-shadow) 20%, transparent 20%),
+                radial-gradient(var(--stud-shadow) 20%, transparent 20%);
+            background-size: 40px 40px;
+            background-position: 0 0, 20px 20px;
+            font-family: 'Space Mono', monospace;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            color: var(--brick-black);
+        }
+
+        .game-container {
+            width: 90vw;
+            max-width: 800px;
+            height: 600px;
+            background: var(--brick-white);
+            border: 12px solid var(--brick-black);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 20px 20px 0px var(--brick-black);
+            image-rendering: pixelated;
+        }
+
+        /* Lego Stud Header */
+        .stud-row {
+            display: flex;
+            justify-content: space-around;
+            padding: 10px;
+            background: var(--brick-red);
+            border-bottom: 8px solid var(--brick-black);
+        }
+
+        .stud {
+            width: 30px;
+            height: 10px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 15px 15px 0 0;
+        }
+
+        /* Sprite Area */
+        .battle-scene {
+            flex-grow: 1;
+            background: linear-gradient(to bottom, #87CEEB 0%, #87CEEB 70%, #90EE90 70%, #90EE90 100%);
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .pokemon-sprite {
+            width: 160px;
+            height: 160px;
+            position: relative;
+            animation: bounce 1s infinite steps(2);
+        }
+
+        /* CSS PIXEL ART HEART */
+        .heart-pixel {
+            width: 20px;
+            height: 20px;
+            background: var(--brick-pink);
+            position: absolute;
+            box-shadow: 
+                20px 0 var(--brick-red), 40px 0 var(--brick-red), 80px 0 var(--brick-red), 100px 0 var(--brick-red),
+                0px 20px var(--brick-red), 20px 20px var(--brick-red), 40px 20px var(--brick-red), 60px 20px var(--brick-red), 80px 20px var(--brick-red), 100px 20px var(--brick-red), 120px 20px var(--brick-red),
+                0px 40px var(--brick-red), 20px 40px var(--brick-red), 40px 40px var(--brick-red), 60px 40px var(--brick-red), 80px 40px var(--brick-red), 100px 40px var(--brick-red), 120px 40px var(--brick-red),
+                20px 60px var(--brick-red), 40px 60px var(--brick-red), 60px 60px var(--brick-red), 80px 60px var(--brick-red), 100px 60px var(--brick-red),
+                40px 80px var(--brick-red), 60px 80px var(--brick-red), 80px 80px var(--brick-red),
+                60px 100px var(--brick-red);
+            left: 20px;
+            top: 20px;
+        }
+        
+
+        /* UI Blocks */
+        .info-panel {
+            position: absolute;
+            top: 40px;
+            right: 40px;
+            background: white;
+            border: 6px solid var(--brick-black);
+            padding: 15px;
+            width: 240px;
+            transform: skew(-2deg);
+        }
+
+        .name-tag {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 14px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .hp-bar-container {
+            width: 100%;
+            height: 12px;
+            background: #eee;
+            border: 3px solid var(--brick-black);
+        }
+
+        .hp-fill {
+            width: 100%;
+            height: 100%;
+            background: var(--brick-green);
+            transition: width 0.5s ease;
+        }
+
+        /* Dialogue Box */
+        .dialogue-box {
+            height: 180px;
+            background: var(--brick-white);
+            border-top: 10px solid var(--brick-black);
+            display: flex;
+            padding: 25px;
+            gap: 20px;
+        }
+
+        .text-area {
+            flex-grow: 1;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 18px;
+            line-height: 1.6;
+            color: var(--brick-black);
+        }
+
+        .action-menu {
+            width: 250px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 10px;
+            border: 6px solid var(--brick-black);
+            padding: 10px;
+            background: #fff;
+        }
+
+        .btn {
+            background: none;
+            border: none;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 12px;
+            text-align: left;
+            padding: 10px;
+            display: flex;
+            align-items: center;
+            transition: all 0.1s;
+            position: relative;
+        }
+
+        .btn:hover::before {
+            content: '▶';
+            margin-right: 5px;
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+        }
+
+        .brick-btn {
+            background: var(--brick-blue);
+            color: white;
+            border: 4px solid var(--brick-black);
+            box-shadow: 0 4px 0 var(--brick-black);
+            padding: 15px;
+            text-transform: uppercase;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .brick-btn:active {
+            box-shadow: 0 0px 0 var(--brick-black);
+            transform: translateY(4px);
+        }
+
+        .no-btn-container {
+            position: relative;
+        }
+
+        /* Lego Studs on Buttons */
+        .lego-decor {
+            position: absolute;
+            top: -12px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: space-around;
+            pointer-events: none;
+        }
+
+        .btn-stud {
+            width: 14px;
+            height: 8px;
+            background: inherit;
+            border: 4px solid var(--brick-black);
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .shake {
+            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-1px, 0, 0); }
+            20%, 80% { transform: translate3d(2px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+            40%, 60% { transform: translate3d(4px, 0, 0); }
+        }
+
+        /* Success State */
+        #success-overlay {
+            position: absolute;
+            inset: 0;
+            background: var(--brick-yellow);
+            z-index: 100;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .sparkle {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: white;
+            animation: flash 0.5s infinite;
+        }
+
+        @keyframes flash {
+            0% { opacity: 0; }
+            50% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="game-container" id="main-ui">
+        <!-- LEGO Header -->
+        <div class="stud-row">
+            <div class="stud"></div>
+            <div class="stud"></div>
+            <div class="stud"></div>
+            <div class="stud"></div>
+            <div class="stud"></div>
+            <div class="stud"></div>
+        </div>
+
+        <!-- Pokemon Battle View -->
+        <div class="battle-scene">
+            <div class="info-panel">
+                <div class="name-tag">CARMEN Lvl. 14</div>
+                <div style="font-size: 10px; margin-bottom: 4px;">HP:</div>
+                <div class="hp-bar-container">
+                    <div class="hp-fill" id="hp-bar"></div>
+                </div>
+            </div>
+
+            <div class="pokemon-sprite">
+                <div class="heart-pixel"></div>
+            </div>
+        </div>
+
+        <!-- Dialogue & Controls -->
+        <div class="dialogue-box">
+            <div class="text-area" id="dialogue-text">
+                A wild Valentine appeared! <br><br>
+                What will YOU do?
+            </div>
+            <div class="action-menu">
+                <button class="btn" onclick="askQuestion()">FIGHT</button>
+                <button class="btn" onclick="showHint()">BAG</button>
+                <button class="btn" onclick="askQuestion()">POKé</button>
+                <button class="btn" onclick="runAway()">RUN</button>
+            </div>
+        </div>
+
+        <!-- Success Modal Hidden -->
+        <div id="success-overlay">
+            <div class="name-tag" style="font-size: 30px; margin-bottom: 30px;">GOTCHA!</div>
+            <div class="text-area" style="font-size: 20px;">
+                CARMEN was caught!<br>
+                She is now your Valentine!
+            </div>
+            <div style="margin-top: 40px; display: flex; gap: 10px;">
+                <div style="width: 40px; height: 40px; background: var(--brick-red); border: 4px solid black;"></div>
+                <div style="width: 40px; height: 40px; background: var(--brick-blue); border: 4px solid black;"></div>
+                <div style="width: 40px; height: 40px; background: var(--brick-yellow); border: 4px solid black;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- The Interaction Overlay -->
+    <div id="quest-modal" style="display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; align-items: center; justify-content: center;">
+        <div style="background: var(--brick-white); border: 10px solid var(--brick-black); padding: 40px; width: 500px; position: relative;">
+            <div class="lego-decor">
+                <div class="btn-stud" style="background: var(--brick-red)"></div>
+                <div class="btn-stud" style="background: var(--brick-red)"></div>
+                <div class="btn-stud" style="background: var(--brick-red)"></div>
+            </div>
+            <h2 style="font-family: 'Press Start 2P'; font-size: 18px; margin-bottom: 30px; line-height: 1.5;">CARMEN, will you be my Valentine?</h2>
+            
+            <div style="display: flex; gap: 20px; justify-content: center;">
+                <button class="brick-btn" style="width: 120px;" onclick="accept()">YES</button>
+                <button id="no-btn" class="brick-btn" style="width: 120px; background: #666;" onmouseover="moveNo()">NO</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const dialogue = document.getElementById('dialogue-text');
+        const hpBar = document.getElementById('hp-bar');
+        const questModal = document.getElementById('quest-modal');
+        const noBtn = document.getElementById('no-btn');
+
+        function typeWriter(text) {
+            dialogue.innerHTML = '';
+            let i = 0;
+            const timer = setInterval(() => {
+                if (i < text.length) {
+                    dialogue.innerHTML += text.charAt(i);
+                    i++;
+                } else {
+                    clearInterval(timer);
+                }
+            }, 50);
+        }
+
+        function showHint() {
+            typeWriter("You used LOVE BALL! It's super effective!");
+            hpBar.style.width = '20%';
+            hpBar.style.background = 'var(--brick-red)';
+        }
+
+        function runAway() {
+            typeWriter("There's no running from destiny, Carmen!");
+            document.querySelector('.game-container').classList.add('shake');
+            setTimeout(() => {
+                document.querySelector('.game-container').classList.remove('shake');
+            }, 500);
+        }
+
+        function askQuestion() {
+            questModal.style.display = 'flex';
+        }
+
+        function moveNo() {
+            const x = Math.random() * (window.innerWidth - 150);
+            const y = Math.random() * (window.innerHeight - 150);
+            noBtn.style.position = 'fixed';
+            noBtn.style.left = x + 'px';
+            noBtn.style.top = y + 'px';
+        }
+
+        function accept() {
+            questModal.style.display = 'none';
+            document.getElementById('success-overlay').style.display = 'flex';
+            
+            // Create sparkles
+            for(let i=0; i<20; i++) {
+                const s = document.createElement('div');
+                s.className = 'sparkle';
+                s.style.left = Math.random() * 100 + '%';
+                s.style.top = Math.random() * 100 + '%';
+                s.style.animationDelay = Math.random() * 2 + 's';
+                document.getElementById('success-overlay').appendChild(s);
+            }
+        }
+    </script>
+</body>
+</html>
