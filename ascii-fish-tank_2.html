@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐟 ASCII Fish Tank</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+
+  :root {
+    --bg: #000000;
+    --tank-bg: #000000;
+    --accent1: #00ff41;
+    --accent2: #ff6b6b;
+    --accent3: #ffd166;
+    --accent4: #00ff41;
+    --text: #00ff41;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #000;
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  h1 {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.85rem;
+    color: rgba(0,255,65,0.6);
+    margin-bottom: 6px;
+    letter-spacing: 5px;
+    text-transform: uppercase;
+  }
+
+  #status {
+    font-size: 0.6rem;
+    color: rgba(0,255,65,0.45);
+    margin-bottom: 8px;
+    min-height: 16px;
+    text-align: center;
+    letter-spacing: 2px;
+  }
+
+  #layout {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  /* TANK */
+  #tank-wrapper {
+    position: relative;
+    border: 1px solid rgba(0,255,65,0.25);
+    overflow: hidden;
+    background: #000;
+  }
+
+  #tank {
+    display: block;
+    image-rendering: pixelated;
+  }
+
+  /* CAMERA */
+  #cam-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+
+  #cam-frame {
+    position: relative;
+    border: 1px solid rgba(0,255,65,0.25);
+    overflow: hidden;
+  }
+
+  #video {
+    display: block;
+    transform: scaleX(-1);
+    filter: grayscale(1) brightness(0.65);
+  }
+
+  #overlay {
+    position: absolute;
+    top: 0; left: 0;
+    transform: scaleX(-1);
+    pointer-events: none;
+  }
+
+  #pinch-indicator {
+    font-size: 0.55rem;
+    color: rgba(0,255,65,0.4);
+    text-align: center;
+    letter-spacing: 3px;
+  }
+
+  #pinch-meter {
+    width: 160px;
+    height: 2px;
+    background: rgba(0,255,65,0.1);
+    overflow: hidden;
+  }
+
+  #pinch-bar {
+    height: 100%;
+    width: 0%;
+    background: #00ff41;
+    transition: width 0.1s;
+  }
+</style>
+</head>
+<body>
+
+<h1>🐠 ASCII FISH TANK</h1>
+<div id="status">Loading hand tracking...</div>
+
+<div id="layout">
+
+  <!-- TANK -->
+  <div id="tank-wrapper">
+    <canvas id="tank" width="700" height="420"></canvas>
+  </div>
+
+  <!-- CAMERA -->
+  <div id="cam-wrapper">
+    <div id="cam-frame">
+      <video id="video" width="160" height="120" autoplay playsinline muted></video>
+      <canvas id="overlay" width="160" height="120"></canvas>
+    </div>
+    <div id="pinch-indicator">PINCH TO FEED</div>
+    <div id="pinch-meter"><div id="pinch-bar"></div></div>
+  </div>
+
+</div>
+
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const TANK_W = 700, TANK_H = 420;
+const FONT_SIZE = 13;          // px per char cell
+const COLS = Math.floor(TANK_W / (FONT_SIZE * 0.6));
+const ROWS = Math.floor(TANK_H / FONT_SIZE);
+const NUM_FISH = 10;
+const PINCH_THRESHOLD = 0.07;  // normalized distance
+const FOOD_RADIUS = 18;        // px, fish target radius
+
+const FISH_COLORS = [
+  '#ff4d4d','#ff9f43','#ffd166','#a8e063',
+  '#00e5ff','#c77dff','#ff6ec7','#48dbfb',
+  '#54a0ff','#00ff87'
+];
+
+const FISH_BODY = { r: '><>', l: '<><' };
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+let foods = [];      // { x, y, eaten, age }
+let fedCount = 0;
+let bubbles = [];    // { x, y, age, maxAge, col }
+let pinching = false;
+let pinchCooldown = 0;
+let pinchPos = { x: 0.5, y: 0.5 };  // normalized 0-1 in cam space
+
+// ─── FISH CLASS ───────────────────────────────────────────────────────────────
+class Fish {
+  constructor(i) {
+    this.id = i;
+    this.x = Math.random() * TANK_W;
+    this.y = 60 + Math.random() * (TANK_H - 120);
+    this.vx = (Math.random() - 0.5) * 1.5;
+    this.vy = (Math.random() - 0.5) * 0.5;
+    this.color = FISH_COLORS[i % FISH_COLORS.length];
+    this.body = FISH_BODY;
+    this.hungry = 0;       // 0-1
+    this.target = null;    // food ref
+    this.eating = 0;       // eating animation timer
+    this.wobble = Math.random() * Math.PI * 2;
+    this.wobbleSpeed = 0.04 + Math.random() * 0.03;
+    this.facing = this.vx >= 0 ? 1 : -1; // 1=right -1=left
+    this.speed = 0.8 + Math.random() * 0.6;
+    this.depth = 0.5 + Math.random() * 0.5; // parallax
+  }
+
+  get label() {
+    return this.facing === 1 ? this.body.r : this.body.l;
+  }
+
+  update(dt) {
+    this.wobble += this.wobbleSpeed;
+    this.hungry = Math.min(1, this.hungry + 0.0002);
+
+    // find nearest uneaten food
+    if (!this.target || this.target.eaten) {
+      this.target = null;
+      let best = Infinity;
+      for (const f of foods) {
+        if (f.eaten) continue;
+        const d = Math.hypot(f.x - this.x, f.y - this.y);
+        if (d < best) { best = d; this.target = f; }
+      }
+    }
+
+    if (this.target) {
+      // swim toward food
+      const dx = this.target.x - this.x;
+      const dy = this.target.y - this.y;
+      const dist = Math.hypot(dx, dy);
+      const speed = this.speed * (1 + this.hungry * 1.5);
+
+      if (dist < FOOD_RADIUS) {
+        // eat it!
+        this.target.eaten = true;
+        this.eating = 15;
+        this.hungry = Math.max(0, this.hungry - 0.5);
+        fedCount++;
+        spawnBubbles(this.x, this.y, this.color);
+        this.target = null;
+      } else {
+        this.vx += (dx / dist) * 0.15 * speed;
+        this.vy += (dy / dist) * 0.08 * speed;
+      }
+    } else {
+      // idle wander
+      this.vx += (Math.random() - 0.5) * 0.08;
+      this.vy += (Math.random() - 0.5) * 0.04;
+      this.vy += Math.sin(this.wobble * 0.5) * 0.02;
+    }
+
+    // clamp speed
+    const maxSpd = this.target ? 3.5 : 1.8;
+    const spd = Math.hypot(this.vx, this.vy);
+    if (spd > maxSpd) { this.vx = (this.vx/spd)*maxSpd; this.vy = (this.vy/spd)*maxSpd; }
+
+    // damping
+    this.vx *= 0.97; this.vy *= 0.97;
+
+    this.x += this.vx; this.y += this.vy;
+
+    // bounce off walls
+    const margin = 30;
+    if (this.x < margin)      { this.vx += 0.3; }
+    if (this.x > TANK_W-margin){ this.vx -= 0.3; }
+    if (this.y < 40)           { this.vy += 0.3; }
+    if (this.y > TANK_H-30)    { this.vy -= 0.3; }
+
+    this.x = Math.max(0, Math.min(TANK_W, this.x));
+    this.y = Math.max(10, Math.min(TANK_H-10, this.y));
+
+    if (Math.abs(this.vx) > 0.1) this.facing = this.vx > 0 ? 1 : -1;
+    if (this.eating > 0) this.eating--;
+  }
+
+  draw(ctx) {
+    ctx.save();
+    ctx.font = `bold ${FONT_SIZE}px "Space Mono", monospace`;
+    ctx.textBaseline = 'middle';
+
+    const alpha = this.eating > 0 ? 1 : (0.75 + 0.25 * Math.sin(this.wobble));
+    ctx.globalAlpha = alpha;
+
+    // glow for hungry/eating fish
+    if (this.eating > 0) {
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 12;
+    } else if (this.target) {
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 6;
+    }
+
+    ctx.fillStyle = this.color;
+    const txt = this.eating > 0 ? '~nom~' : this.label;
+    ctx.fillText(txt, this.x, this.y);
+    ctx.restore();
+  }
+}
+
+// ─── BUBBLES ──────────────────────────────────────────────────────────────────
+function spawnBubbles(x, y, color) {
+  for (let i = 0; i < 6; i++) {
+    bubbles.push({
+      x: x + (Math.random()-0.5)*20,
+      y,
+      vx: (Math.random()-0.5)*0.8,
+      vy: -(0.5 + Math.random()*1.2),
+      age: 0,
+      maxAge: 60 + Math.random()*40,
+      color,
+      char: ['o','°','·','∘','O'][Math.floor(Math.random()*5)]
+    });
+  }
+}
+
+// ambient bubbles
+function spawnAmbientBubble() {
+  bubbles.push({
+    x: 20 + Math.random() * (TANK_W - 40),
+    y: TANK_H - 10,
+    vx: (Math.random()-0.5)*0.3,
+    vy: -(0.3 + Math.random()*0.6),
+    age: 0,
+    maxAge: 90 + Math.random()*60,
+    color: 'rgba(0,255,65,0.3)',
+    char: ['o','°','·'][Math.floor(Math.random()*3)]
+  });
+}
+
+// ─── SEAWEED ──────────────────────────────────────────────────────────────────
+const WEEDS = Array.from({length: 8}, (_, i) => ({
+  x: 40 + (i * (TANK_W-80)/7),
+  height: 3 + Math.floor(Math.random()*5),
+  phase: Math.random()*Math.PI*2,
+  color: ['#00cc33','#00aa28','#009922','#00bb2e'][i%4]
+}));
+
+// ─── SETUP FISH ───────────────────────────────────────────────────────────────
+const fishes = Array.from({length: NUM_FISH}, (_, i) => new Fish(i));
+
+// ─── CANVAS SETUP ─────────────────────────────────────────────────────────────
+const tankCanvas = document.getElementById('tank');
+const ctx = tankCanvas.getContext('2d');
+
+// ─── WATER GRADIENT BG ────────────────────────────────────────────────────────
+function drawBackground(t) {
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, TANK_W, TANK_H);
+
+  // very subtle scanline effect
+  ctx.globalAlpha = 0.03;
+  ctx.fillStyle = '#00ff41';
+  for (let y = 0; y < TANK_H; y += 2) {
+    ctx.fillRect(0, y, TANK_W, 1);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ─── DRAW SEAWEED ─────────────────────────────────────────────────────────────
+function drawSeaweed(t) {
+  ctx.font = `${FONT_SIZE}px "Space Mono", monospace`;
+  ctx.textBaseline = 'middle';
+  for (const w of WEEDS) {
+    ctx.fillStyle = w.color;
+    for (let i = 0; i < w.height; i++) {
+      const sway = Math.sin(t * 0.0015 + w.phase + i * 0.4) * 3;
+      ctx.globalAlpha = 0.6 + 0.4*(i/w.height);
+      const chars = ['¥','ψ','ψ','φ','ψ'];
+      ctx.fillText(chars[i % chars.length],
+        w.x + sway,
+        TANK_H - 15 - i * FONT_SIZE * 0.9);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ─── DRAW FLOOR ───────────────────────────────────────────────────────────────
+function drawFloor() {
+  ctx.font = `${FONT_SIZE * 0.8}px "Space Mono", monospace`;
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(0,255,65,0.2)';
+  const floorChars = ['_','~','_','_','~','_','.','_','_','~'];
+  for (let x = 0; x < TANK_W; x += FONT_SIZE * 0.6) {
+    const i = Math.floor(x / (FONT_SIZE * 0.6)) % floorChars.length;
+    ctx.fillText(floorChars[i], x, TANK_H - 6);
+  }
+}
+
+// ─── DRAW SURFACE ─────────────────────────────────────────────────────────────
+function drawSurface(t) {
+  ctx.font = `${FONT_SIZE * 0.7}px "Space Mono", monospace`;
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(0,255,65,0.25)';
+  const waveChars = ['~','~','≈','~','~','≋','~'];
+  for (let x = 0; x < TANK_W; x += FONT_SIZE * 0.55) {
+    const phase = Math.sin(t * 0.001 + x * 0.03) * 3;
+    const i = Math.floor(x / (FONT_SIZE * 0.55)) % waveChars.length;
+    ctx.fillText(waveChars[i], x, 12 + phase);
+  }
+}
+
+// ─── DRAW FOOD ────────────────────────────────────────────────────────────────
+function drawFoods(t) {
+  ctx.font = `bold ${FONT_SIZE}px "Space Mono", monospace`;
+  ctx.textBaseline = 'middle';
+  for (const f of foods) {
+    if (f.eaten) continue;
+    // food slowly drifts down
+    f.y += 0.3 + Math.sin(t * 0.002 + f.x) * 0.1;
+    if (f.y > TANK_H - 20) f.eaten = true;
+
+    const bob = Math.sin(t * 0.003 + f.x * 0.1) * 2;
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.shadowColor = '#00ff41';
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = '#00ff41';
+    ctx.fillText('•', f.x, f.y + bob);
+    ctx.restore();
+  }
+  // clean eaten
+  if (foods.length > 40) foods = foods.filter(f => !f.eaten);
+}
+
+// ─── DRAW BUBBLES ─────────────────────────────────────────────────────────────
+function drawBubbles() {
+  ctx.font = `${FONT_SIZE * 0.7}px "Space Mono", monospace`;
+  ctx.textBaseline = 'middle';
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    const b = bubbles[i];
+    b.x += b.vx; b.y += b.vy;
+    b.age++;
+    if (b.age > b.maxAge || b.y < 5) { bubbles.splice(i, 1); continue; }
+    ctx.globalAlpha = (1 - b.age / b.maxAge) * 0.7;
+    ctx.fillStyle = b.color;
+    ctx.fillText(b.char, b.x, b.y);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ─── MAIN LOOP ────────────────────────────────────────────────────────────────
+let lastAmbient = 0;
+function loop(t) {
+  drawBackground(t);
+  drawSeaweed(t);
+  drawFloor();
+  drawSurface(t);
+
+  // ambient bubbles
+  if (t - lastAmbient > 800) {
+    spawnAmbientBubble();
+    lastAmbient = t;
+  }
+
+  // update & draw fish
+  for (const f of fishes) { f.update(1); f.draw(ctx); }
+
+  drawFoods(t);
+  drawBubbles();
+
+  // pinch cooldown
+  if (pinchCooldown > 0) pinchCooldown--;
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ─── MEDIAPIPE HANDS ──────────────────────────────────────────────────────────
+const videoEl = document.getElementById('video');
+const overlayCanvas = document.getElementById('overlay');
+const overlayCtx = overlayCanvas.getContext('2d');
+const pinchBar = document.getElementById('pinch-bar');
+const statusEl = document.getElementById('status');
+
+function normCamToTank(nx, ny) {
+  // cam is mirrored; nx is already in mirrored space from MediaPipe
+  return {
+    x: nx * TANK_W,
+    y: ny * TANK_H
+  };
+}
+
+let wasPinching = false;
+
+function onResults(results) {
+  overlayCtx.clearRect(0, 0, 160, 120);
+
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    pinchBar.style.width = '0%';
+    wasPinching = false;
+    return;
+  }
+
+  const lm = results.multiHandLandmarks[0];
+  const thumbTip  = lm[4];
+  const indexTip  = lm[8];
+
+  // draw skeleton on overlay
+  drawConnectors(overlayCtx, lm, HAND_CONNECTIONS, { color: 'rgba(0,255,65,0.4)', lineWidth: 1 });
+  drawLandmarks(overlayCtx, lm, { color: '#00ff41', lineWidth: 1, radius: 2 });
+
+  // highlight thumb & index
+  overlayCtx.beginPath();
+  overlayCtx.arc(thumbTip.x * 160, thumbTip.y * 120, 5, 0, Math.PI * 2);
+  overlayCtx.fillStyle = '#00ff41';
+  overlayCtx.fill();
+  overlayCtx.beginPath();
+  overlayCtx.arc(indexTip.x * 160, indexTip.y * 120, 5, 0, Math.PI * 2);
+  overlayCtx.fillStyle = 'rgba(0,255,65,0.6)';
+  overlayCtx.fill();
+
+  const dist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+  const pct = Math.max(0, 1 - dist / (PINCH_THRESHOLD * 3));
+  pinchBar.style.width = (pct * 100) + '%';
+
+  const isPinching = dist < PINCH_THRESHOLD;
+
+  if (isPinching && !wasPinching && pinchCooldown === 0) {
+    // pinch! drop food at midpoint mapped to tank
+    const mx = (thumbTip.x + indexTip.x) / 2;
+    const my = (thumbTip.y + indexTip.y) / 2;
+    // camera is mirrored display; mediapipe gives raw (un-mirrored) coords
+    // so mirror x for tank mapping
+    const tx = normCamToTank(1 - mx, my);
+
+    for (let i = 0; i < 3 + Math.floor(Math.random()*3); i++) {
+      foods.push({
+        x: tx.x + (Math.random()-0.5)*40,
+        y: tx.y + (Math.random()-0.5)*20,
+        eaten: false,
+        age: 0
+      });
+    }
+
+    // flash on overlay
+    const fx = mx * 160, fy = my * 120;
+    overlayCtx.beginPath();
+    overlayCtx.arc(fx, fy, 12, 0, Math.PI*2);
+    overlayCtx.strokeStyle = '#00ff41';
+    overlayCtx.lineWidth = 1;
+    overlayCtx.stroke();
+
+    pinchCooldown = 20;
+    statusEl.textContent = '> food dropped -- fish incoming';
+    setTimeout(() => { statusEl.textContent = '> pinch thumb + index to feed'; }, 1500);
+  }
+
+  wasPinching = isPinching;
+
+  if (isPinching) {
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(thumbTip.x * 160, thumbTip.y * 120);
+    overlayCtx.lineTo(indexTip.x * 160, indexTip.y * 120);
+    overlayCtx.strokeStyle = '#00ff41';
+    overlayCtx.lineWidth = 1;
+    overlayCtx.stroke();
+  }
+}
+
+const hands = new Hands({
+  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+});
+
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.6
+});
+
+hands.onResults(onResults);
+
+const camera = new Camera(videoEl, {
+  onFrame: async () => { await hands.send({ image: videoEl }); },
+  width: 160, height: 120
+});
+
+camera.start()
+  .then(() => {
+    statusEl.textContent = '✌️ Pinch thumb & index to feed';
+  })
+  .catch(err => {
+    statusEl.textContent = '⚠️ Camera error: ' + err.message;
+    console.error(err);
+  });
+</script>
+</body>
+</html>
